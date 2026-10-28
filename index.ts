@@ -34,7 +34,11 @@ function progress(message = "", done = false) {
   }
 }
 
-async function update({ checkout, report }: { checkout: string; report: (stage: string) => void }) {
+async function update({ checkout, report, installDependencies }: {
+  checkout: string;
+  report: (stage: string) => void;
+  installDependencies: (cwd: string) => Promise<void>;
+}) {
   report("checking repository");
   const git = (args: string[]) => run(checkout, "git", args);
   const top = await git(["rev-parse", "--show-toplevel"]);
@@ -92,7 +96,7 @@ async function update({ checkout, report }: { checkout: string; report: (stage: 
     const updated = before !== await git(["rev-parse", "HEAD"]);
     if (!existsSync(join(checkout, "node_modules")) || updated) {
       report("installing dependencies");
-      await run(checkout, "pnpm", ["install", existsSync(join(checkout, "pnpm-lock.yaml")) ? "--frozen-lockfile" : "--lockfile=false", "--ignore-scripts"]);
+      await installDependencies(checkout);
     }
     return updated;
   } finally {
@@ -136,7 +140,21 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       if (!folder.isDirectory() || folder.name.startsWith(".")) continue;
       const checkout = join(root, folder.name);
       const report = (stage: string) => progress(`${folder.name}: ${stage}`);
-      const updated = await update({ checkout, report });
+      const updated = await update({
+        checkout,
+        report,
+        installDependencies: (cwd) => {
+          const manager = packages["getPackageManagerName"]();
+          const lockfileFlags: Record<string, string> = {
+            npm: "--package-lock=false",
+            pnpm: "--no-lockfile",
+            bun: "--no-save",
+          };
+          const flag = lockfileFlags[manager];
+          if (!flag) throw new Error(`Cannot disable lockfile writes for package manager "${manager}".`);
+          return packages["runNpmCommand"]([...packages["getGitDependencyInstallArgs"](), flag], { cwd });
+        },
+      });
       const matches = installed.filter((entry) => entry.installedPath && basename(entry.installedPath) === folder.name);
       if (matches.length) {
         for (const match of matches) await redirect({ installed: match.installedPath!, checkout, report });

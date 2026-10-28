@@ -10,8 +10,6 @@ You choose the repository, branch, and local commits through Git. There is no se
 
 ## Setup
 
-Git and pnpm must be available.
-
 In `~/.pi/agent/settings.json`, put the extender first in the `packages` list:
 
 ```json
@@ -40,7 +38,7 @@ Make your changes in that checkout. Commit your changes before you start Pi. The
 
 The extender loads every non-hidden folder in this directory. Each folder must contain a Git checkout of a Pi extension package. The current branch must have a tracking branch.
 
-After an update, the extender installs dependencies. It also installs dependencies that are absent. It does not run dependency install scripts.
+The extender uses Pi’s dependency installer, with the same package manager and install behavior as `pi update`.
 
 If you use `PI_CODING_AGENT_DIR`, put the checkouts in `extension-extender/` under that directory instead.
 
