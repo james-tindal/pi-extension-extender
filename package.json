@@ -1,0 +1,12 @@
+{
+  "name": "extension-extender",
+  "private": true,
+  "license": "0BSD",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
