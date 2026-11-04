@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DefaultPackageManager, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, readdir, readlink, rename, rm, symlink, lstat, unlink } from "node:fs/promises";
+import { mkdir, readdir, readlink, rm, symlink, lstat, unlink } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -125,16 +125,9 @@ async function redirect({ installed, checkout, report }: {
     await symlink(checkout, installed, "dir");
     return;
   }
-  const backup = `${installed}.extension-extender-original`;
-  if (existsSync(backup)) throw new Error(`Refusing to overwrite ${backup}.`);
   report("redirecting installed package to local checkout");
-  await rename(installed, backup);
-  try {
-    await symlink(checkout, installed, "dir");
-  } catch (error) {
-    await rename(backup, installed);
-    throw error;
-  }
+  await rm(installed, { recursive: true });
+  await symlink(checkout, installed, "dir");
 }
 
 export default async function extensionExtender(pi: ExtensionAPI) {
