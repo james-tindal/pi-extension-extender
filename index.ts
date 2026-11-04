@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DefaultPackageManager, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, readdir, readlink, rename, rm, symlink, lstat } from "node:fs/promises";
+import { mkdir, readdir, readlink, rename, rm, symlink, lstat, unlink } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -47,7 +47,12 @@ async function update({ checkout, report, installDependencies }: {
   }
   const gitDir = await git(["rev-parse", "--absolute-git-dir"]);
   const lock = join(gitDir, "extension-extender.lock");
-  await mkdir(lock);
+  try {
+    await mkdir(lock);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
   try {
     if (await git(["status", "--porcelain"])) throw new Error(`${checkout} has uncommitted changes.`);
     for (const state of ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"]) {
@@ -114,7 +119,11 @@ async function redirect({ installed, checkout, report }: {
   if (stat.isSymbolicLink()) {
     const target = resolve(installed, "..", await readlink(installed));
     if (realpathSync(target) === realpathSync(checkout)) return;
-    throw new Error(`${installed} already links to ${target}.`);
+    // The package manager relinked it on reinstall; take it back.
+    report("relinking installed package to local checkout");
+    await unlink(installed);
+    await symlink(checkout, installed, "dir");
+    return;
   }
   const backup = `${installed}.extension-extender-original`;
   if (existsSync(backup)) throw new Error(`Refusing to overwrite ${backup}.`);
