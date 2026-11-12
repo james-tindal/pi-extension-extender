@@ -172,7 +172,9 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       }
       const ahead = await run(checkout, "git", ["rev-list", "--count", "@{upstream}..HEAD"]);
       const state = updated ? "updated" : "already up to date";
-      const status = ahead === "0" ? `${state}; no local commits on top of upstream` : state;
+      const dirty = await run(checkout, "git", ["status", "--porcelain"]);
+      const local = ahead !== "0" ? undefined : dirty ? "uncommitted changes on top of upstream" : "no local changes on top of upstream";
+      const status = local ? `${state}; ${local}` : state;
       progress(`${folder.name}: ${status}`, true);
     }
   } catch (error) {
