@@ -9,6 +9,9 @@
   "pi": {
     "extensions": ["./index.ts"]
   },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
   }

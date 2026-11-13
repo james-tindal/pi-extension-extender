@@ -1,11 +1,32 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { basename } from "node:path";
-import { npmPackageName, npmRepositoryUrl, type Run } from "./add-package.ts";
+import { promisify } from "node:util";
 import { progress } from "./progress.ts";
 
+const exec = promisify(execFile);
+
 export const REMOTE = "extension-extender-upstream";
+
+export async function run(cwd: string, command: string, args: string[], env: Record<string, string> = {}) {
+  const { stdout } = await exec(command, args, {
+    cwd,
+    timeout: 120_000,
+    maxBuffer: 4 * 1024 * 1024,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true", ...env },
+  });
+  return stdout.trim();
+}
+
+export type Run = (cwd: string, command: string, args: string[], env?: Record<string, string>) => Promise<string>;
+
+export const npmPackageName = (source: string): string => source.slice("npm:".length).replace(/@[^@/]+$/, "");
+
+export async function npmRepositoryUrl(run: Run, root: string, source: string): Promise<string> {
+  return run(root, "npm", ["view", npmPackageName(source), "repository.url"]);
+}
 
 export class UpdateSkipped extends Error {}
 

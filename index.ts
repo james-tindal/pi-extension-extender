@@ -1,29 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DefaultPackageManager, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readdir, readlink, rm, symlink, lstat, unlink } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
-import { orderExtenderBeforeCovered, overrideBrief, overrideWarning } from "./settings-doctor.ts";
-import { addPackage } from "./add-package.ts";
-import { upstreamFor } from "./prepare-upstream.ts";
+import { overrideBrief, overrideWarning } from "./settings-doctor.ts";
+import { addCommand, coveredBy, installDependencies, orderCheck, overridden, packageSetup } from "./add-package.ts";
+import { run, upstreamFor } from "./prepare-upstream.ts";
 import { progress } from "./progress.ts";
 
-const exec = promisify(execFile);
-
 class RebaseConflict extends Error {}
-
-async function run(cwd: string, command: string, args: string[], env: Record<string, string> = {}) {
-  const { stdout } = await exec(command, args, {
-    cwd,
-    timeout: 120_000,
-    maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true", ...env },
-  });
-  return stdout.trim();
-}
 
 async function update({ checkout, source, report, installDependencies }: {
   checkout: string;
@@ -95,76 +80,29 @@ async function redirect({ installed, checkout, report }: {
   await symlink(checkout, installed, "dir");
 }
 
-type InstalledPackages = ReturnType<DefaultPackageManager["listConfiguredPackages"]>;
-
-const overridden = (root: string, installed: InstalledPackages) => async (source: string) => {
-  const entry = installed.find((item) => item.source === source && item.scope === "user" && item.installedPath !== undefined);
-  if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`);
-  const checkout = join(root, basename(entry.installedPath));
-  const upstream = await upstreamFor({ checkout, source, run });
-  if (upstream === undefined) return false;
-  const ahead = await run(checkout, "git", ["rev-list", "--count", `HEAD..${upstream}`]);
-  const dirty = await run(checkout, "git", ["status", "--porcelain"]);
-  return ahead !== "0" || dirty !== "";
-};
-
-async function coveredBy(root: string, installed: InstalledPackages) {
-  const folders = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => entry.name);
-  return (source: string, scope: "user" | "project") => installed.some((entry) => entry.source === source && entry.scope === scope && entry.installedPath !== undefined && folders.includes(basename(entry.installedPath)));
-}
-
 export default async function extensionExtender(pi: ExtensionAPI) {
   try {
-    const agentDir = getAgentDir();
-    const root = join(agentDir, "extension-extender");
-    await mkdir(root, { recursive: true });
+    const { agentDir, root, packages } = await packageSetup(process.cwd());
     pi.registerCommand("extension-extender", {
       description: "Run extension-extender: doctor, or add <git:|npm:>",
       handler: async (args, ctx) => {
         const tokens = args.trim().split(/\s+/);
         const [subcommand] = tokens;
-        const checkOrder = async () => {
-          const order = await orderCheck();
-          for (const fix of order.fixes) ctx.ui.notify(`${fix}. Run /reload to apply it.`, "warning");
-          for (const source of order.overrides) ctx.ui.notify(overrideWarning(source), "warning");
-        };
         if (subcommand === "install-global") {
           await packages.install("npm:pi-extension-extender");
-          await orderCheck();
+          await orderCheck({ agentDir, cwd: process.cwd(), root, packages });
           await ctx.reload();
           return;
         }
         if (subcommand === "add") {
-          const checkout = await addPackage({ tokens, root, agentDir, cwd: process.cwd(), run });
-          if (checkout !== undefined) {
-            await installDependencies(checkout);
-            ctx.ui.notify(`Checkout: ${checkout}`, "info");
-          }
-          await checkOrder();
+          for (const message of await addCommand({ tokens, root, agentDir, cwd: process.cwd(), packages })) ctx.ui.notify(message.text, message.level);
           return;
         }
         throw new Error("Usage: /extension-extender add [-l|--local] <git:|npm:> | /extension-extender install-global");
       },
     });
-    const settingsManager = SettingsManager.create(process.cwd(), agentDir);
-    const packages = new DefaultPackageManager({ cwd: process.cwd(), agentDir, settingsManager });
     const installed = packages.listConfiguredPackages();
-    const installDependencies = (cwd: string) => {
-      const manager = packages["getPackageManagerName"]();
-      const lockfileFlags: Record<string, string> = {
-        npm: "--package-lock=false",
-        pnpm: "--no-lockfile",
-        bun: "--no-save",
-      };
-      const flag = lockfileFlags[manager];
-      if (!flag) throw new Error(`Cannot disable lockfile writes for package manager "${manager}".`);
-      return packages["runNpmCommand"]([...packages["getGitDependencyInstallArgs"](), flag], { cwd });
-    };
-    async function orderCheck() {
-      const current = packages.listConfiguredPackages();
-      return orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered: await coveredBy(root, current), hasOverride: overridden(root, current) });
-    }
-    const order = await orderCheck();
+    const order = await orderCheck({ agentDir, cwd: process.cwd(), root, packages });
     for (const fix of order.fixes) pi.on("session_start", (_event, ctx) => ctx.ui.notify(`${fix}. Run /reload to apply it.`, "warning"));
     const skipUpdate = new Set(order.overrides.map((source) => {
       const entry = installed.find((item) => item.source === source && item.scope === "user");
@@ -185,7 +123,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
         checkout,
         source,
         report,
-        installDependencies,
+        installDependencies: (cwd) => installDependencies(packages, cwd),
       });
       const matches = installed.filter((entry) => entry.installedPath && basename(entry.installedPath) === folder.name);
       if (matches.length) {

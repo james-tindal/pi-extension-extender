@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addPackage, type Run } from "./add-package.ts";
+import { addPackage } from "./add-package.ts";
+import type { Run } from "./prepare-upstream.ts";
 
 const EXTENDER = "npm:pi-extension-extender";
 

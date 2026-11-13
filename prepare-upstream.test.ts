@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { prepareUpstream, UpdateSkipped } from "./prepare-upstream.ts";
-import type { Run } from "./add-package.ts";
+import type { Run } from "./prepare-upstream.ts";
 
 const URL = "https://github.com/carderne/pi-sandbox.git";
 
