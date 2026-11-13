@@ -10,14 +10,13 @@ export async function npmRepositoryUrl(run: Run, root: string, source: string): 
   return run(root, "npm", ["view", npmPackageName(source), "repository.url"]);
 }
 
-export async function addPackage({ tokens, root, agentDir, cwd, run, checkOrder }: {
+export async function addPackage({ tokens, root, agentDir, cwd, run }: {
   tokens: string[];
   root: string;
   agentDir: string;
   cwd: string;
   run: Run;
-  checkOrder: () => Promise<void>;
-}) {
+}): Promise<string | undefined> {
   const local = tokens.includes("-l") || tokens.includes("--local");
   const source = tokens.find((token) => token.startsWith("git:") || token.startsWith("npm:"));
   if (!source) throw new Error("Usage: /extension-extender add [-l|--local] <git:|npm:>");
@@ -37,12 +36,9 @@ export async function addPackage({ tokens, root, agentDir, cwd, run, checkOrder 
   const name = basename(url).replace(/\.git$/, "");
   const checkout = join(root, name);
   if (existsSync(checkout)) throw new Error(`${checkout} already exists`);
-  if (await hasEntry(targetPath, source)) {
-    await checkOrder();
-    return;
-  }
+  if (await hasEntry(targetPath, source)) return undefined;
   await addPackageEntry(targetPath, source);
   await run(root, "git", ["clone", url, name]);
   await run(checkout, "git", ["switch", "-c", "local", "--track", "origin/main"]);
-  await checkOrder();
+  return checkout;
 }

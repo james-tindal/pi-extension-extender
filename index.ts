@@ -6,10 +6,10 @@ import { mkdir, readdir, readlink, rm, symlink, lstat, unlink } from "node:fs/pr
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { clearLine, cursorTo } from "node:readline";
 import { orderExtenderBeforeCovered, overrideBrief, overrideWarning } from "./settings-doctor.ts";
 import { addPackage } from "./add-package.ts";
-import { prepareUpstream, UpdateSkipped } from "./prepare-upstream.ts";
+import { upstreamFor } from "./prepare-upstream.ts";
+import { progress } from "./progress.ts";
 
 const exec = promisify(execFile);
 
@@ -25,22 +25,10 @@ async function run(cwd: string, command: string, args: string[], env: Record<str
   return stdout.trim();
 }
 
-function progress(message = "", done = false) {
-  const line = message ? `extension-extender: ${message}` : "";
-  if (process.stderr.isTTY) {
-    cursorTo(process.stderr, 0);
-    clearLine(process.stderr, 0);
-    process.stderr.write(line.slice(0, Math.max(1, process.stderr.columns - 1)));
-    if (done) process.stderr.write("\n");
-  } else if (message) {
-    process.stderr.write(`${line}\n`);
-  }
-}
-
 async function update({ checkout, source, report, installDependencies }: {
   checkout: string;
   source: string;
-  report: (stage: string) => void;
+  report: (stage: string, done?: boolean) => void;
   installDependencies: (cwd: string) => Promise<void>;
 }) {
   report("checking repository");
@@ -54,20 +42,15 @@ async function update({ checkout, source, report, installDependencies }: {
   try {
     await mkdir(lock);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
     throw error;
   }
   try {
     for (const state of ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"]) {
       if (existsSync(join(gitDir, state))) throw new Error(`${checkout} has an unfinished Git operation.`);
     }
-    const target = await prepareUpstream({ checkout, source, run }).catch((error: unknown) => {
-      if (error instanceof UpdateSkipped) {
-        report(error.message);
-        return undefined;
-      }
-      throw error;
-    });
+    const target = await upstreamFor({ checkout, source, run });
+    if (target === undefined) return;
     const before = await git(["rev-parse", "HEAD"]);
     if (target !== undefined && await git(["rev-list", "--count", `HEAD..${target}`]) !== "0") {
       report(`rebasing onto ${target}`);
@@ -85,7 +68,7 @@ async function update({ checkout, source, report, installDependencies }: {
       report("installing dependencies");
       await installDependencies(checkout);
     }
-    return updated;
+    report(updated ? "updated" : "already up to date", true);
   } finally {
     await rm(lock, { recursive: true });
   }
@@ -118,7 +101,9 @@ const overridden = (root: string, installed: InstalledPackages) => async (source
   const entry = installed.find((item) => item.source === source && item.scope === "user" && item.installedPath !== undefined);
   if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`);
   const checkout = join(root, basename(entry.installedPath));
-  const ahead = await run(checkout, "git", ["rev-list", "--count", "@{upstream}..HEAD"]);
+  const upstream = await upstreamFor({ checkout, source, run });
+  if (upstream === undefined) return false;
+  const ahead = await run(checkout, "git", ["rev-list", "--count", `HEAD..${upstream}`]);
   const dirty = await run(checkout, "git", ["status", "--porcelain"]);
   return ahead !== "0" || dirty !== "";
 };
@@ -149,7 +134,9 @@ export default async function extensionExtender(pi: ExtensionAPI) {
           return;
         }
         if (subcommand === "add") {
-          await addPackage({ tokens, root, agentDir, cwd: process.cwd(), run, checkOrder });
+          const checkout = await addPackage({ tokens, root, agentDir, cwd: process.cwd(), run });
+          if (checkout !== undefined) await installDependencies(checkout);
+          await checkOrder();
           return;
         }
         throw new Error("Usage: /extension-extender add [-l|--local] <git:|npm:> | /extension-extender install-global");
@@ -158,6 +145,17 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     const settingsManager = SettingsManager.create(process.cwd(), agentDir);
     const packages = new DefaultPackageManager({ cwd: process.cwd(), agentDir, settingsManager });
     const installed = packages.listConfiguredPackages();
+    const installDependencies = (cwd: string) => {
+      const manager = packages["getPackageManagerName"]();
+      const lockfileFlags: Record<string, string> = {
+        npm: "--package-lock=false",
+        pnpm: "--no-lockfile",
+        bun: "--no-save",
+      };
+      const flag = lockfileFlags[manager];
+      if (!flag) throw new Error(`Cannot disable lockfile writes for package manager "${manager}".`);
+      return packages["runNpmCommand"]([...packages["getGitDependencyInstallArgs"](), flag], { cwd });
+    };
     async function orderCheck() {
       const current = packages.listConfiguredPackages();
       return orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered: await coveredBy(root, current), hasOverride: overridden(root, current) });
@@ -176,24 +174,14 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     for (const folder of await readdir(root, { withFileTypes: true })) {
       if (!folder.isDirectory() || folder.name.startsWith(".")) continue;
       const checkout = join(root, folder.name);
-      const report = (stage: string) => progress(`${folder.name}: ${stage}`);
+      const report = (stage: string, done = false) => progress(`${folder.name}: ${stage}`, done);
       const source = installed.find((entry) => entry.installedPath && basename(entry.installedPath) === folder.name)?.source;
-      if (source === undefined) report("No matching package found. Cannot check for updates.");
-      const updated = skipUpdate.has(folder.name) || source === undefined ? false : await update({
+      if (source === undefined) report("No matching package found. Cannot check for updates.", true);
+      if (!skipUpdate.has(folder.name) && source !== undefined) await update({
         checkout,
         source,
         report,
-        installDependencies: (cwd) => {
-          const manager = packages["getPackageManagerName"]();
-          const lockfileFlags: Record<string, string> = {
-            npm: "--package-lock=false",
-            pnpm: "--no-lockfile",
-            bun: "--no-save",
-          };
-          const flag = lockfileFlags[manager];
-          if (!flag) throw new Error(`Cannot disable lockfile writes for package manager "${manager}".`);
-          return packages["runNpmCommand"]([...packages["getGitDependencyInstallArgs"](), flag], { cwd });
-        },
+        installDependencies,
       });
       const matches = installed.filter((entry) => entry.installedPath && basename(entry.installedPath) === folder.name);
       if (matches.length) {
@@ -208,12 +196,6 @@ export default async function extensionExtender(pi: ExtensionAPI) {
           await factory(pi);
         }
       }
-      const ahead = await run(checkout, "git", ["rev-list", "--count", "@{upstream}..HEAD"]);
-      const state = updated ? "updated" : "already up to date";
-      const dirty = await run(checkout, "git", ["status", "--porcelain"]);
-      const local = ahead !== "0" ? undefined : dirty ? "uncommitted changes on top of upstream" : "no local changes on top of upstream";
-      const status = local ? `${state}; ${local}` : state;
-      progress(`${folder.name}: ${status}`, true);
     }
   } catch (error) {
     progress();

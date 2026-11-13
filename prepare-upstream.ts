@@ -1,7 +1,9 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { basename } from "node:path";
 import { npmPackageName, npmRepositoryUrl, type Run } from "./add-package.ts";
+import { progress } from "./progress.ts";
 
 export const REMOTE = "extension-extender-upstream";
 
@@ -61,6 +63,22 @@ async function npmFallback({ checkout, source, run }: {
     await commitNpmRelease({ checkout, name, version: latest, parent, run });
   }
   return REMOTE;
+}
+
+export async function upstreamFor({ checkout, source, run }: {
+  checkout: string;
+  source: string;
+  run: Run;
+}) {
+  try {
+    return await prepareUpstream({ checkout, source, run });
+  } catch (error) {
+    if (error instanceof UpdateSkipped) {
+      progress(`${basename(checkout)}: ${error.message}`, true);
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 export async function prepareUpstream({ checkout, source, run }: {

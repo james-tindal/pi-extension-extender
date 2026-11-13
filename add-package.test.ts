@@ -31,31 +31,26 @@ function fakeRun(repositories: Record<string, string> = {}) {
 }
 
 async function add(paths: { agentDir: string; cwd: string; root: string }, run: Run, args: string) {
-  let orderChecks = 0;
-  await addPackage({
+  return addPackage({
     tokens: args.split(/\s+/),
     root: paths.root,
     agentDir: paths.agentDir,
     cwd: paths.cwd,
     run,
-    checkOrder: async () => {
-      orderChecks += 1;
-    },
   });
-  return orderChecks;
 }
 
-test("adds a git package to global settings, clones it, and checks the order", async () => {
+test("adds a git package to global settings, clones it, and returns the checkout path", async () => {
   const paths = setup({ global: JSON.stringify({ packages: [EXTENDER] }) });
   const { run, calls } = fakeRun();
-  const orderChecks = await add(paths, run, "add git:github.com/owner/repo");
+  const checkout = await add(paths, run, "add git:github.com/owner/repo");
   const settings = JSON.parse(readFileSync(join(paths.agentDir, "settings.json"), "utf8"));
   assert.deepEqual(settings.packages, [EXTENDER, "git:github.com/owner/repo"]);
   assert.deepEqual(calls.map((call) => call.args), [
     ["clone", "https://github.com/owner/repo.git", "repo"],
     ["switch", "-c", "local", "--track", "origin/main"],
   ]);
-  assert.equal(orderChecks, 1);
+  assert.equal(checkout, join(paths.root, "repo"));
 });
 
 test("aborts a global add when the extender is not in global settings, and writes nothing", async () => {
@@ -86,14 +81,14 @@ test("aborts when the checkout folder already exists, and writes nothing", async
   assert.deepEqual(calls, []);
 });
 
-test("adds nothing when the entry already exists, and only checks the order", async () => {
+test("adds nothing when the entry already exists, and returns no checkout", async () => {
   const content = JSON.stringify({ packages: [EXTENDER, "git:github.com/owner/repo"] });
   const paths = setup({ global: content });
   const { run, calls } = fakeRun();
-  const orderChecks = await add(paths, run, "add git:github.com/owner/repo");
+  const checkout = await add(paths, run, "add git:github.com/owner/repo");
   assert.equal(readFileSync(join(paths.agentDir, "settings.json"), "utf8"), content);
   assert.deepEqual(calls, []);
-  assert.equal(orderChecks, 1);
+  assert.equal(checkout, undefined);
 });
 
 test("resolves an npm source to its repository.url, stripping the git+ prefix", async () => {
