@@ -3,13 +3,13 @@
   "license": "0BSD",
   "type": "module",
   "bin": {
-    "extension-extender": "./add.ts"
+    "extension-extender": "./src/add.ts"
   },
   "scripts": {
     "test": "node --test"
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": ["./src/index.ts"]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
