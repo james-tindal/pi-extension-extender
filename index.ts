@@ -140,19 +140,25 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       handler: async (args, ctx) => {
         const [subcommand, source] = args.trim().split(/\s+/);
         const report = (message: string) => ctx.ui.notify(message, "info");
-        if (subcommand === "doctor") {
-          await doctor({ agentDir, cwd: process.cwd(), report });
-          return;
-        }
-        if (subcommand === "add" && source?.startsWith("npm:")) {
-          throw new Error("npm: sources are not supported yet; use git:");
-        }
-        if (subcommand === "add" && source?.startsWith("git:")) {
-          const url = `https://${source.slice("git:".length)}.git`;
+        const addCheckout = async (url: string) => {
           const name = basename(url).replace(/\.git$/, "");
           await run(root, "git", ["clone", url, name]);
           await run(join(root, name), "git", ["switch", "-c", "local", "--track", "origin/main"]);
           await doctor({ agentDir, cwd: process.cwd(), report });
+        };
+        if (subcommand === "doctor") {
+          await doctor({ agentDir, cwd: process.cwd(), report });
+          return;
+        }
+        if (subcommand === "add" && source?.startsWith("git:")) {
+          await addCheckout(`https://${source.slice("git:".length)}.git`);
+          return;
+        }
+        if (subcommand === "add" && source?.startsWith("npm:")) {
+          const name = source.slice("npm:".length).replace(/@[^@/]+$/, "");
+          const repository = await run(root, "npm", ["view", name, "repository.url"]);
+          if (!repository) throw new Error(`${name} lists no repository.url on npm`);
+          await addCheckout(repository.replace(/^git\+/, ""));
           return;
         }
         throw new Error("Usage: /extension-extender doctor | /extension-extender add <git:|npm:>");
