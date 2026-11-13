@@ -7,9 +7,9 @@ settings:
 importers:
 
   .:
-    devDependencies:
+    dependencies:
       '@earendil-works/pi-coding-agent':
-        specifier: 0.82.0
+        specifier: '*'
         version: 0.82.0(ws@8.23.0)(zod@4.6.7)
 
 packages:

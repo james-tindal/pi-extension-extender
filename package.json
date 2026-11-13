@@ -1,16 +1,15 @@
 {
-  "name": "extension-extender",
-  "private": true,
+  "name": "pi-extension-extender",
   "license": "0BSD",
   "type": "module",
+  "bin": {
+    "extension-extender": "./add.ts"
+  },
   "scripts": {
     "test": "node --test"
   },
   "pi": {
     "extensions": ["./index.ts"]
-  },
-  "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.82.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
