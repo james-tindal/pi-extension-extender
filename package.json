@@ -1,6 +1,16 @@
 {
   "name": "pi-extension-extender",
+  "version": "1.0.0",
+  "files": [
+    "src",
+    "!src/*.test.ts",
+    "readme.md"
+  ],
   "license": "0BSD",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/james-tindal/pi-extension-extender.git"
+  },
   "type": "module",
   "bin": {
     "extension-extender": "./src/add.ts"
