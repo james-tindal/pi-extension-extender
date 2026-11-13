@@ -1,4 +1,4 @@
-import { clearLine, cursorTo } from "node:readline";
+import { clearLine, cursorTo, moveCursor } from "node:readline";
 
 export function progress(message = "", done = false) {
   const line = message ? `extension-extender: ${message}` : "";
@@ -10,4 +10,23 @@ export function progress(message = "", done = false) {
   } else if (message) {
     process.stderr.write(`${line}\n`);
   }
+}
+
+export function statusBoard(names: string[]) {
+  if (!process.stderr.isTTY) {
+    return (name: string, message: string) => process.stderr.write(`extension-extender: ${name}: ${message}\n`);
+  }
+  const messages = new Map(names.map((name): [string, string] => [name, ""]));
+  process.stderr.write("\n".repeat(names.length));
+  return (name: string, message: string) => {
+    messages.set(name, message);
+    names.forEach((row, index) => {
+      const up = names.length - index;
+      moveCursor(process.stderr, 0, -up);
+      cursorTo(process.stderr, 0);
+      clearLine(process.stderr, 0);
+      process.stderr.write(`extension-extender: ${row}: ${messages.get(row)}`);
+      moveCursor(process.stderr, 0, up);
+    });
+  };
 }

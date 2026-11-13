@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { overrideBrief, overrideWarning } from "./settings-doctor.ts";
 import { addCommand, coveredBy, installDependencies, orderCheck, overridden, packageSetup } from "./add-package.ts";
 import { run, upstreamFor } from "./prepare-upstream.ts";
-import { progress } from "./progress.ts";
+import { progress, statusBoard } from "./progress.ts";
 
 async function update({ checkout, source, report, installDependencies }: {
   checkout: string;
@@ -111,32 +111,52 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       console.error(`extension-extender: ${overrideBrief(source)}`);
       pi.on("session_start", (_event, ctx) => ctx.ui.notify(overrideWarning(source), "warning"));
     }
-    for (const folder of await readdir(root, { withFileTypes: true })) {
-      if (!folder.isDirectory() || folder.name.startsWith(".")) continue;
+    const folders = (await readdir(root, { withFileTypes: true })).filter((folder) => folder.isDirectory() && !folder.name.startsWith("."));
+    const board = statusBoard(folders.map((folder) => folder.name));
+    let previousLoad: Promise<void> = Promise.resolve();
+    await Promise.all(folders.map((folder) => {
       const checkout = join(root, folder.name);
-      const report = (stage: string, done = false) => progress(`${folder.name}: ${stage}`, done);
+      const report = (stage: string) => board(folder.name, stage);
       const source = installed.find((entry) => entry.installedPath && basename(entry.installedPath) === folder.name)?.source;
-      if (source === undefined) report("No matching package found. Cannot check for updates.", true);
-      if (!skipUpdate.has(folder.name) && source !== undefined) await update({
-        checkout,
-        source,
-        report,
-        installDependencies: (cwd) => installDependencies(packages, cwd),
-      });
-      const matches = installed.filter((entry) => entry.installedPath && basename(entry.installedPath) === folder.name);
-      if (matches.length) {
-        for (const match of matches) await redirect({ installed: match.installedPath!, checkout, report });
-      } else {
-        report("loading local extension");
-        const resources = await packages.resolveExtensionSources([checkout]);
-        for (const resource of resources.extensions) {
-          if (!resource.enabled) continue;
-          const { default: factory } = await import(pathToFileURL(resource.path).href);
-          if (typeof factory !== "function") throw new Error(`${resource.path} does not export an extension factory.`);
-          await factory(pi);
+      if (source === undefined) report("No matching package found. Cannot check for updates.");
+      const before = previousLoad;
+      const load = (async () => {
+        if (!skipUpdate.has(folder.name) && source !== undefined) {
+          try {
+            await update({
+              checkout,
+              source,
+              report,
+              installDependencies: (cwd) => installDependencies(packages, cwd),
+            });
+          } catch (error) {
+            report(`update failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
-      }
-    }
+        await before;
+        try {
+          const matches = installed.filter((entry) => entry.installedPath && basename(entry.installedPath) === folder.name);
+          if (matches.length) {
+            for (const match of matches) await redirect({ installed: match.installedPath!, checkout, report });
+          } else {
+            report("loading local extension");
+            const resources = await packages.resolveExtensionSources([checkout]);
+            for (const resource of resources.extensions) {
+              if (!resource.enabled) continue;
+              const { default: factory } = await import(pathToFileURL(resource.path).href);
+              if (typeof factory !== "function") throw new Error(`${resource.path} does not export an extension factory.`);
+              await factory(pi);
+            }
+          }
+        } catch (error) {
+          const message = `Failed to load extension "${checkout}": ${error instanceof Error ? error.message : String(error)}`;
+          report(message);
+          pi.on("session_start", (_event, ctx) => ctx.ui.notify(message, "error"));
+        }
+      })();
+      previousLoad = load;
+      return load;
+    }));
   } catch (error) {
     progress();
     console.error("extension-extender: startup failed", error);
