@@ -7,7 +7,9 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { clearLine, cursorTo } from "node:readline";
-import { doctor, orderExtenderBeforeCovered, overrideBrief, overrideWarning } from "./settings-doctor.ts";
+import { orderExtenderBeforeCovered, overrideBrief, overrideWarning } from "./settings-doctor.ts";
+import { addPackage } from "./add-package.ts";
+import { prepareUpstream, UpdateSkipped } from "./prepare-upstream.ts";
 
 const exec = promisify(execFile);
 
@@ -35,8 +37,9 @@ function progress(message = "", done = false) {
   }
 }
 
-async function update({ checkout, report, installDependencies }: {
+async function update({ checkout, source, report, installDependencies }: {
   checkout: string;
+  source: string;
   report: (stage: string) => void;
   installDependencies: (cwd: string) => Promise<void>;
 }) {
@@ -58,39 +61,18 @@ async function update({ checkout, report, installDependencies }: {
     for (const state of ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"]) {
       if (existsSync(join(gitDir, state))) throw new Error(`${checkout} has an unfinished Git operation.`);
     }
-    const branch = await git(["symbolic-ref", "--short", "HEAD"]);
-    const remote = await git(["config", "--get", `branch.${branch}.remote`]);
-    const remoteBranch = await git(["config", "--get", `branch.${branch}.merge`]);
-    const upstreamRef = await git(["rev-parse", "--symbolic-full-name", "@{upstream}"]);
-    const upstream = await git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
-    const remoteUrl = await git(["remote", "get-url", remote]);
-    const github = /^(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(remoteUrl);
-    let needsFetch = true;
-    if (github) {
-      report("checking remote");
-      const repository = github.slice(1).map(encodeURIComponent).join("/");
-      const ref = remoteBranch.slice("refs/".length).split("/").map(encodeURIComponent).join("/");
-      const response = await fetch(`https://api.github.com/repos/${repository}/git/ref/${ref}`, {
-        headers: { Accept: "application/vnd.github+json", "User-Agent": "extension-extender" },
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!response.ok) throw new Error(`GitHub API check failed for ${upstream}: HTTP ${response.status}.`);
-      const body = await response.json();
-      const sha = body?.object?.sha;
-      if (typeof sha !== "string" || !/^[a-f0-9]{40}$/i.test(sha)) {
-        throw new Error(`GitHub API returned an invalid commit SHA for ${upstream}.`);
+    const target = await prepareUpstream({ checkout, source, run }).catch((error: unknown) => {
+      if (error instanceof UpdateSkipped) {
+        report(error.message);
+        return undefined;
       }
-      needsFetch = sha !== await git(["rev-parse", upstreamRef]);
-    }
-    if (needsFetch) {
-      report("fetching remote");
-      await git(["fetch", "--no-tags", remote, `+${remoteBranch}:${upstreamRef}`]);
-    }
+      throw error;
+    });
     const before = await git(["rev-parse", "HEAD"]);
-    if (await git(["rev-list", "--count", `HEAD..${upstream}`]) !== "0") {
-      report(`rebasing ${branch} onto ${upstream}`);
+    if (target !== undefined && await git(["rev-list", "--count", `HEAD..${target}`]) !== "0") {
+      report(`rebasing onto ${target}`);
       try {
-        await git(["-c", "rebase.updateRefs=false", "rebase", upstream]);
+        await git(["-c", "rebase.updateRefs=false", "rebase", target]);
       } catch (error) {
         if (await git(["diff", "--name-only", "--diff-filter=U"])) {
           throw new RebaseConflict(`Rebase conflict in ${checkout}.\nResolve the rebase conflict in that repository, then restart Pi.`);
@@ -154,47 +136,34 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     pi.registerCommand("extension-extender", {
       description: "Run extension-extender: doctor, or add <git:|npm:>",
       handler: async (args, ctx) => {
-        const [subcommand, source] = args.trim().split(/\s+/);
-        const report = (message: string) => ctx.ui.notify(message, "info");
-        const runDoctor = async () => doctor({ agentDir, cwd: process.cwd(), report, isCovered: await coveredBy(root, packages.listConfiguredPackages()), hasOverride: overridden(root, packages.listConfiguredPackages()) });
-        const addCheckout = async (url: string) => {
-          const name = basename(url).replace(/\.git$/, "");
-          await run(root, "git", ["clone", url, name]);
-          await run(join(root, name), "git", ["switch", "-c", "local", "--track", "origin/main"]);
-          await runDoctor();
+        const tokens = args.trim().split(/\s+/);
+        const [subcommand] = tokens;
+        const checkOrder = async () => {
+          const order = await orderCheck();
+          for (const fix of order.fixes) ctx.ui.notify(`${fix}. Run /reload to apply it.`, "warning");
+          for (const source of order.overrides) ctx.ui.notify(overrideWarning(source), "warning");
         };
-        if (subcommand === "doctor") {
-          await runDoctor();
-          return;
-        }
         if (subcommand === "install-global") {
           await packages.install("npm:pi-extension-extender");
           await ctx.reload();
           return;
         }
-        if (subcommand === "add" && source?.startsWith("git:")) {
-          await addCheckout(`https://${source.slice("git:".length)}.git`);
+        if (subcommand === "add") {
+          await addPackage({ tokens, root, agentDir, cwd: process.cwd(), run, checkOrder });
           return;
         }
-        if (subcommand === "add" && source?.startsWith("npm:")) {
-          const name = source.slice("npm:".length).replace(/@[^@/]+$/, "");
-          const repository = await run(root, "npm", ["view", name, "repository.url"]);
-          if (!repository) throw new Error(`${name} lists no repository.url on npm`);
-          await addCheckout(repository.replace(/^git\+/, ""));
-          return;
-        }
-        throw new Error("Usage: /extension-extender doctor | /extension-extender add <git:|npm:> | /extension-extender install-global");
+        throw new Error("Usage: /extension-extender add [-l|--local] <git:|npm:> | /extension-extender install-global");
       },
     });
     const settingsManager = SettingsManager.create(process.cwd(), agentDir);
     const packages = new DefaultPackageManager({ cwd: process.cwd(), agentDir, settingsManager });
     const installed = packages.listConfiguredPackages();
-    const order = await orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered: await coveredBy(root, installed), hasOverride: overridden(root, installed) });
-    if (order.fixes.length) {
-      for (const fix of order.fixes) console.error(`extension-extender: ${fix}`);
-      console.error("extension-extender: settings were fixed; start Pi again.");
-      process.exit(1);
+    async function orderCheck() {
+      const current = packages.listConfiguredPackages();
+      return orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered: await coveredBy(root, current), hasOverride: overridden(root, current) });
     }
+    const order = await orderCheck();
+    for (const fix of order.fixes) pi.on("session_start", (_event, ctx) => ctx.ui.notify(`${fix}. Run /reload to apply it.`, "warning"));
     const skipUpdate = new Set(order.overrides.map((source) => {
       const entry = installed.find((item) => item.source === source && item.scope === "user");
       if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`);
@@ -208,8 +177,11 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       if (!folder.isDirectory() || folder.name.startsWith(".")) continue;
       const checkout = join(root, folder.name);
       const report = (stage: string) => progress(`${folder.name}: ${stage}`);
-      const updated = skipUpdate.has(folder.name) ? false : await update({
+      const source = installed.find((entry) => entry.installedPath && basename(entry.installedPath) === folder.name)?.source;
+      if (source === undefined) report("No matching package found. Cannot check for updates.");
+      const updated = skipUpdate.has(folder.name) || source === undefined ? false : await update({
         checkout,
+        source,
         report,
         installDependencies: (cwd) => {
           const manager = packages["getPackageManagerName"]();

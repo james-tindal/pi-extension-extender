@@ -1,8 +1,6 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 export const EXTENDER_SOURCES = ["npm:pi-extension-extender", "git:github.com/james-tindal/pi-extension-extender"];
 
@@ -19,6 +17,25 @@ function sourceOf(entry: unknown): string | undefined {
   return undefined;
 }
 
+export async function hasEntry(path: string, source: string): Promise<boolean> {
+  const settings = await readSettings(path);
+  return Array.isArray(settings?.packages) && settings.packages.some((entry) => sourceOf(entry) === source);
+}
+
+export async function listsExtender(path: string): Promise<boolean> {
+  const settings = await readSettings(path);
+  return Array.isArray(settings?.packages) && settings.packages.some((entry) => EXTENDER_SOURCES.includes(sourceOf(entry) ?? ""));
+}
+
+export async function addPackageEntry(path: string, source: string): Promise<void> {
+  const settings: Settings = (await readSettings(path)) ?? {};
+  const packages = Array.isArray(settings.packages) ? settings.packages : [];
+  packages.push(source);
+  settings.packages = packages;
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`);
+}
+
 export const overrideBrief = (source: string): string => `${source} is loaded from global settings before the local override`;
 
 export const overrideWarning = (source: string): string => `${source} loads from global settings before local extension-extender can load. Run /extension-extender install-global to enable your package override`;
@@ -28,7 +45,7 @@ export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered, has
   cwd: string;
   isCovered: (source: string, scope: "user" | "project") => boolean;
   hasOverride: (source: string) => Promise<boolean>;
-}): Promise<{ fixes: string[]; overrides: string[]; listed: boolean }> {
+}): Promise<{ fixes: string[]; overrides: string[] }> {
   const globalPath = join(agentDir, "settings.json");
   const projectPath = join(cwd, ".pi", "settings.json");
   const fixes: string[] = [];
@@ -57,29 +74,5 @@ export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered, has
       overrides.push(source);
     }
   }
-  return { fixes, overrides, listed: listed.user || listed.project };
-}
-
-export async function doctor({ agentDir, cwd, report, isCovered, hasOverride }: {
-  agentDir: string;
-  cwd: string;
-  report: (message: string) => void;
-  isCovered: (source: string, scope: "user" | "project") => boolean;
-  hasOverride: (source: string) => Promise<boolean>;
-}) {
-  const order = await orderExtenderBeforeCovered({ agentDir, cwd, isCovered, hasOverride });
-  for (const message of order.fixes) report(message);
-  for (const source of order.overrides) report(overrideWarning(source));
-  if (!order.listed) report("extension-extender is not listed in any settings.json");
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  console.log("extension-extender: covered packages are only known inside Pi, so ordering is not checked here; use /extension-extender doctor");
-  await doctor({
-    agentDir: process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"),
-    cwd: process.cwd(),
-    report: (message) => console.log(message),
-    isCovered: () => false,
-    hasOverride: async () => false,
-  });
+  return { fixes, overrides };
 }
