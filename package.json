@@ -3,6 +3,9 @@
   "private": true,
   "license": "0BSD",
   "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
   "pi": {
     "extensions": ["./index.ts"]
   },
