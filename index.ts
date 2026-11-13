@@ -130,6 +130,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
         };
         if (subcommand === "install-global") {
           await packages.install("npm:pi-extension-extender");
+          await orderCheck();
           await ctx.reload();
           return;
         }
