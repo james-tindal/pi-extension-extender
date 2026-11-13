@@ -7,6 +7,7 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { clearLine, cursorTo } from "node:readline";
+import { doctor } from "./settings-doctor.ts";
 
 const exec = promisify(execFile);
 
@@ -134,6 +135,29 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     const agentDir = getAgentDir();
     const root = join(agentDir, "extension-extender");
     await mkdir(root, { recursive: true });
+    pi.registerCommand("extension-extender", {
+      description: "Run extension-extender: doctor, or add <git:|npm:>",
+      handler: async (args, ctx) => {
+        const [subcommand, source] = args.trim().split(/\s+/);
+        const report = (message: string) => ctx.ui.notify(message, "info");
+        if (subcommand === "doctor") {
+          await doctor({ agentDir, cwd: process.cwd(), report });
+          return;
+        }
+        if (subcommand === "add" && source?.startsWith("npm:")) {
+          throw new Error("npm: sources are not supported yet; use git:");
+        }
+        if (subcommand === "add" && source?.startsWith("git:")) {
+          const url = `https://${source.slice("git:".length)}.git`;
+          const name = basename(url).replace(/\.git$/, "");
+          await run(root, "git", ["clone", url, name]);
+          await run(join(root, name), "git", ["switch", "-c", "local", "--track", "origin/main"]);
+          await doctor({ agentDir, cwd: process.cwd(), report });
+          return;
+        }
+        throw new Error("Usage: /extension-extender doctor | /extension-extender add <git:|npm:>");
+      },
+    });
     const settingsManager = SettingsManager.create(process.cwd(), agentDir);
     const packages = new DefaultPackageManager({ cwd: process.cwd(), agentDir, settingsManager });
     const installed = packages.listConfiguredPackages();
