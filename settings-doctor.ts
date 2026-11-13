@@ -19,45 +19,58 @@ function sourceOf(entry: unknown): string | undefined {
   return undefined;
 }
 
-export async function doctor({ agentDir, cwd, report, isCovered }: {
-  agentDir: string;
-  cwd: string;
-  report: (message: string) => void;
-  isCovered: (source: string, scope: "user" | "project") => boolean;
-}) {
-  for (const fix of await orderExtenderBeforeCovered({ agentDir, cwd, isCovered })) report(fix);
-  const globalSettings = await readSettings(join(agentDir, "settings.json"));
-  const projectSettings = await readSettings(join(cwd, ".pi", "settings.json"));
-  const entriesOf = (settings: Settings | undefined): unknown[] => (Array.isArray(settings?.packages) ? settings.packages : []);
-  const listsExtender = (entries: unknown[]) => entries.some((entry) => EXTENDER_SOURCES.includes(sourceOf(entry) ?? ""));
-  const globalEntries = entriesOf(globalSettings);
-  const projectEntries = entriesOf(projectSettings);
-  if (!listsExtender(globalEntries) && !listsExtender(projectEntries)) report("extension-extender is not listed in any settings.json");
-  if (listsExtender(projectEntries) && globalEntries.length > 0) {
-    report("extension-extender is in project settings, so global packages load before it; move it to the global settings.json");
-  }
-}
+export const overrideBrief = (source: string): string => `${source} is loaded from global settings before the local override`;
 
-export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered }: {
+export const overrideWarning = (source: string): string => `${source} loads from global settings before local extension-extender can load. Run /extension-extender install-global to enable your package override`;
+
+export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered, hasOverride }: {
   agentDir: string;
   cwd: string;
   isCovered: (source: string, scope: "user" | "project") => boolean;
-}): Promise<string[]> {
+  hasOverride: (source: string) => Promise<boolean>;
+}): Promise<{ fixes: string[]; overrides: string[]; listed: boolean }> {
+  const globalPath = join(agentDir, "settings.json");
+  const projectPath = join(cwd, ".pi", "settings.json");
   const fixes: string[] = [];
-  for (const [path, scope] of [[join(agentDir, "settings.json"), "user"], [join(cwd, ".pi", "settings.json"), "project"]] as const) {
+  const overrides: string[] = [];
+  const listed = { user: false, project: false };
+  for (const [path, scope] of [[globalPath, "user"], [projectPath, "project"]] as const) {
     const settings = await readSettings(path);
     if (!settings || !Array.isArray(settings.packages)) continue;
     const packages = settings.packages;
     const extenderIndex = packages.findIndex((entry) => EXTENDER_SOURCES.includes(sourceOf(entry) ?? ""));
     if (extenderIndex === -1) continue;
-    const coveredIndex = packages.findIndex((entry) => isCovered(sourceOf(entry) ?? "", scope));
+    listed[scope] = true;
+    const coveredIndex = packages.findIndex((entry) => !EXTENDER_SOURCES.includes(sourceOf(entry) ?? "") && isCovered(sourceOf(entry) ?? "", scope));
     if (coveredIndex === -1 || coveredIndex > extenderIndex) continue;
     const [extender] = packages.splice(extenderIndex, 1);
     packages.splice(coveredIndex, 0, extender);
     await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`);
     fixes.push(`moved extension-extender above ${sourceOf(packages[coveredIndex + 1])} in ${path}`);
   }
-  return fixes;
+  if (listed.project && !listed.user) {
+    const globalSettings = await readSettings(globalPath);
+    const globalPackages = Array.isArray(globalSettings?.packages) ? globalSettings.packages : [];
+    for (const entry of globalPackages) {
+      const source = sourceOf(entry);
+      if (source === undefined || !isCovered(source, "user") || !(await hasOverride(source))) continue;
+      overrides.push(source);
+    }
+  }
+  return { fixes, overrides, listed: listed.user || listed.project };
+}
+
+export async function doctor({ agentDir, cwd, report, isCovered, hasOverride }: {
+  agentDir: string;
+  cwd: string;
+  report: (message: string) => void;
+  isCovered: (source: string, scope: "user" | "project") => boolean;
+  hasOverride: (source: string) => Promise<boolean>;
+}) {
+  const order = await orderExtenderBeforeCovered({ agentDir, cwd, isCovered, hasOverride });
+  for (const message of order.fixes) report(message);
+  for (const source of order.overrides) report(overrideWarning(source));
+  if (!order.listed) report("extension-extender is not listed in any settings.json");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -67,5 +80,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     cwd: process.cwd(),
     report: (message) => console.log(message),
     isCovered: () => false,
+    hasOverride: async () => false,
   });
 }

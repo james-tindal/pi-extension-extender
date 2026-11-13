@@ -7,7 +7,7 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { clearLine, cursorTo } from "node:readline";
-import { doctor, orderExtenderBeforeCovered } from "./settings-doctor.ts";
+import { doctor, orderExtenderBeforeCovered, overrideBrief, overrideWarning } from "./settings-doctor.ts";
 
 const exec = promisify(execFile);
 
@@ -130,7 +130,18 @@ async function redirect({ installed, checkout, report }: {
   await symlink(checkout, installed, "dir");
 }
 
-async function coveredBy(root: string, installed: ReturnType<DefaultPackageManager["listConfiguredPackages"]>) {
+type InstalledPackages = ReturnType<DefaultPackageManager["listConfiguredPackages"]>;
+
+const overridden = (root: string, installed: InstalledPackages) => async (source: string) => {
+  const entry = installed.find((item) => item.source === source && item.scope === "user" && item.installedPath !== undefined);
+  if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`);
+  const checkout = join(root, basename(entry.installedPath));
+  const ahead = await run(checkout, "git", ["rev-list", "--count", "@{upstream}..HEAD"]);
+  const dirty = await run(checkout, "git", ["status", "--porcelain"]);
+  return ahead !== "0" || dirty !== "";
+};
+
+async function coveredBy(root: string, installed: InstalledPackages) {
   const folders = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => entry.name);
   return (source: string, scope: "user" | "project") => installed.some((entry) => entry.source === source && entry.scope === scope && entry.installedPath !== undefined && folders.includes(basename(entry.installedPath)));
 }
@@ -145,7 +156,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       handler: async (args, ctx) => {
         const [subcommand, source] = args.trim().split(/\s+/);
         const report = (message: string) => ctx.ui.notify(message, "info");
-        const runDoctor = async () => doctor({ agentDir, cwd: process.cwd(), report, isCovered: await coveredBy(root, packages.listConfiguredPackages()) });
+        const runDoctor = async () => doctor({ agentDir, cwd: process.cwd(), report, isCovered: await coveredBy(root, packages.listConfiguredPackages()), hasOverride: overridden(root, packages.listConfiguredPackages()) });
         const addCheckout = async (url: string) => {
           const name = basename(url).replace(/\.git$/, "");
           await run(root, "git", ["clone", url, name]);
@@ -154,6 +165,11 @@ export default async function extensionExtender(pi: ExtensionAPI) {
         };
         if (subcommand === "doctor") {
           await runDoctor();
+          return;
+        }
+        if (subcommand === "install-global") {
+          await packages.install("npm:pi-extension-extender");
+          await ctx.reload();
           return;
         }
         if (subcommand === "add" && source?.startsWith("git:")) {
@@ -167,23 +183,32 @@ export default async function extensionExtender(pi: ExtensionAPI) {
           await addCheckout(repository.replace(/^git\+/, ""));
           return;
         }
-        throw new Error("Usage: /extension-extender doctor | /extension-extender add <git:|npm:>");
+        throw new Error("Usage: /extension-extender doctor | /extension-extender add <git:|npm:> | /extension-extender install-global");
       },
     });
     const settingsManager = SettingsManager.create(process.cwd(), agentDir);
     const packages = new DefaultPackageManager({ cwd: process.cwd(), agentDir, settingsManager });
     const installed = packages.listConfiguredPackages();
-    const fixes = await orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered: await coveredBy(root, installed) });
-    if (fixes.length) {
-      for (const fix of fixes) console.error(`extension-extender: ${fix}`);
+    const order = await orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered: await coveredBy(root, installed), hasOverride: overridden(root, installed) });
+    if (order.fixes.length) {
+      for (const fix of order.fixes) console.error(`extension-extender: ${fix}`);
       console.error("extension-extender: settings were fixed; start Pi again.");
       process.exit(1);
+    }
+    const skipUpdate = new Set(order.overrides.map((source) => {
+      const entry = installed.find((item) => item.source === source && item.scope === "user");
+      if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`);
+      return basename(entry.installedPath);
+    }));
+    for (const source of order.overrides) {
+      console.error(`extension-extender: ${overrideBrief(source)}`);
+      pi.on("session_start", (_event, ctx) => ctx.ui.notify(overrideWarning(source), "warning"));
     }
     for (const folder of await readdir(root, { withFileTypes: true })) {
       if (!folder.isDirectory() || folder.name.startsWith(".")) continue;
       const checkout = join(root, folder.name);
       const report = (stage: string) => progress(`${folder.name}: ${stage}`);
-      const updated = await update({
+      const updated = skipUpdate.has(folder.name) ? false : await update({
         checkout,
         report,
         installDependencies: (cwd) => {
