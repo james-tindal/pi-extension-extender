@@ -136,7 +136,10 @@ export default async function extensionExtender(pi: ExtensionAPI) {
         }
         if (subcommand === "add") {
           const checkout = await addPackage({ tokens, root, agentDir, cwd: process.cwd(), run });
-          if (checkout !== undefined) await installDependencies(checkout);
+          if (checkout !== undefined) {
+            await installDependencies(checkout);
+            ctx.ui.notify(`Checkout: ${checkout}`, "info");
+          }
           await checkOrder();
           return;
         }
