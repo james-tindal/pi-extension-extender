@@ -1,12 +1,47 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, readdir, readlink, rm, symlink, lstat, unlink } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, readlink, rm, symlink, lstat, unlink, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { overrideBrief, overrideWarning } from "./settings-doctor.ts";
 import { addCommand, coveredBy, installDependencies, orderCheck, overridden, packageSetup } from "./add-package.ts";
 import { run, upstreamFor } from "./prepare-upstream.ts";
 import { progress, statusBoard } from "./progress.ts";
+
+function processAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function acquireLock(lock: string, report: (stage: string) => void) {
+  const pending = `${lock}.${process.pid}`;
+  await writeFile(pending, String(process.pid));
+  let waiting = false;
+  try {
+    for (;;) {
+      try {
+        await link(pending, lock);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      const owner = Number(await readFile(lock, "utf8").catch(() => ""));
+      if (Number.isInteger(owner) && owner > 0 && processAlive(owner)) {
+        if (!waiting) report(`waiting for process ${owner} to complete the update`);
+        waiting = true;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        continue;
+      }
+      await rm(lock, { recursive: true, force: true });
+    }
+  } finally {
+    await rm(pending, { force: true });
+  }
+}
 
 async function update({ checkout, source, report, installDependencies }: {
   checkout: string;
@@ -22,12 +57,7 @@ async function update({ checkout, source, report, installDependencies }: {
   }
   const gitDir = await git(["rev-parse", "--absolute-git-dir"]);
   const lock = join(gitDir, "extension-extender.lock");
-  try {
-    await mkdir(lock);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
-    throw error;
-  }
+  await acquireLock(lock, report);
   try {
     for (const state of ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"]) {
       if (existsSync(join(gitDir, state))) throw new Error(`${checkout} has an unfinished Git operation.`);
@@ -53,7 +83,7 @@ async function update({ checkout, source, report, installDependencies }: {
     }
     report(updated ? "updated" : "already up to date", true);
   } finally {
-    await rm(lock, { recursive: true });
+    await rm(lock, { force: true });
   }
 }
 
