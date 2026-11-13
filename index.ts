@@ -54,7 +54,6 @@ async function update({ checkout, report, installDependencies }: {
     throw error;
   }
   try {
-    if (await git(["status", "--porcelain"])) throw new Error(`${checkout} has uncommitted changes.`);
     for (const state of ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"]) {
       if (existsSync(join(gitDir, state))) throw new Error(`${checkout} has an unfinished Git operation.`);
     }
