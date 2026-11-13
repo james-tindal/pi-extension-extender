@@ -15,12 +15,12 @@ const exec = promisify(execFile);
 
 class RebaseConflict extends Error {}
 
-async function run(cwd: string, command: string, args: string[]) {
+async function run(cwd: string, command: string, args: string[], env: Record<string, string> = {}) {
   const { stdout } = await exec(command, args, {
     cwd,
     timeout: 120_000,
     maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true" },
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true", ...env },
   });
   return stdout.trim();
 }

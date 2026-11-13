@@ -2,13 +2,12 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { addPackageEntry, hasEntry, listsExtender } from "./settings-doctor.ts";
 
-export type Run = (cwd: string, command: string, args: string[]) => Promise<string>;
+export type Run = (cwd: string, command: string, args: string[], env?: Record<string, string>) => Promise<string>;
 
-export async function npmRepository(run: Run, root: string, source: string) {
-  const name = source.slice("npm:".length).replace(/@[^@/]+$/, "");
-  const repository = await run(root, "npm", ["view", name, "repository.url"]);
-  if (!repository) throw new Error(`${name} lists no repository.url on npm`);
-  return repository.replace(/^git\+/, "");
+export const npmPackageName = (source: string): string => source.slice("npm:".length).replace(/@[^@/]+$/, "");
+
+export async function npmRepositoryUrl(run: Run, root: string, source: string): Promise<string> {
+  return run(root, "npm", ["view", npmPackageName(source), "repository.url"]);
 }
 
 export async function addPackage({ tokens, root, agentDir, cwd, run, checkOrder }: {
@@ -27,7 +26,14 @@ export async function addPackage({ tokens, root, agentDir, cwd, run, checkOrder 
   if (!local && !(await listsExtender(globalPath))) {
     throw new Error("extension-extender is not in global settings. Run /extension-extender install-global first, or add with -l.");
   }
-  const url = source.startsWith("git:") ? `https://${source.slice("git:".length)}.git` : await npmRepository(run, root, source);
+  let url: string;
+  if (source.startsWith("git:")) {
+    url = `https://${source.slice("git:".length)}.git`;
+  } else {
+    const repository = await npmRepositoryUrl(run, root, source);
+    if (!repository) throw new Error(`${npmPackageName(source)} lists no repository.url on npm`);
+    url = repository.replace(/^git\+/, "");
+  }
   const name = basename(url).replace(/\.git$/, "");
   const checkout = join(root, name);
   if (existsSync(checkout)) throw new Error(`${checkout} already exists`);
