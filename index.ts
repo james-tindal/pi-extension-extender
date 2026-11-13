@@ -7,7 +7,7 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { clearLine, cursorTo } from "node:readline";
-import { doctor } from "./settings-doctor.ts";
+import { doctor, orderExtenderBeforeCovered } from "./settings-doctor.ts";
 
 const exec = promisify(execFile);
 
@@ -167,6 +167,14 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     const settingsManager = SettingsManager.create(process.cwd(), agentDir);
     const packages = new DefaultPackageManager({ cwd: process.cwd(), agentDir, settingsManager });
     const installed = packages.listConfiguredPackages();
+    const folders = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => entry.name);
+    const isCovered = (source: string, scope: "user" | "project") => installed.some((entry) => entry.source === source && entry.scope === scope && entry.installedPath !== undefined && folders.includes(basename(entry.installedPath)));
+    const fixes = await orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered });
+    if (fixes.length) {
+      for (const fix of fixes) console.error(`extension-extender: ${fix}`);
+      console.error("extension-extender: settings were fixed; start Pi again.");
+      process.exit(1);
+    }
     for (const folder of await readdir(root, { withFileTypes: true })) {
       if (!folder.isDirectory() || folder.name.startsWith(".")) continue;
       const checkout = join(root, folder.name);

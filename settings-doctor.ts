@@ -47,6 +47,28 @@ export async function doctor({ agentDir, cwd, report }: {
   }
 }
 
+export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered }: {
+  agentDir: string;
+  cwd: string;
+  isCovered: (source: string, scope: "user" | "project") => boolean;
+}): Promise<string[]> {
+  const fixes: string[] = [];
+  for (const [path, scope] of [[join(agentDir, "settings.json"), "user"], [join(cwd, ".pi", "settings.json"), "project"]] as const) {
+    const settings = await readSettings(path);
+    if (!settings || !Array.isArray(settings.packages)) continue;
+    const packages = settings.packages;
+    const extenderIndex = packages.findIndex((entry) => EXTENDER_SOURCES.includes(sourceOf(entry) ?? ""));
+    if (extenderIndex === -1) continue;
+    const coveredIndex = packages.findIndex((entry) => isCovered(sourceOf(entry) ?? "", scope));
+    if (coveredIndex === -1 || coveredIndex > extenderIndex) continue;
+    const [extender] = packages.splice(extenderIndex, 1);
+    packages.splice(coveredIndex, 0, extender);
+    await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`);
+    fixes.push(`moved extension-extender above ${sourceOf(packages[coveredIndex + 1])} in ${path}`);
+  }
+  return fixes;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await doctor({
     agentDir: process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"),
