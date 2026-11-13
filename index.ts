@@ -130,6 +130,11 @@ async function redirect({ installed, checkout, report }: {
   await symlink(checkout, installed, "dir");
 }
 
+async function coveredBy(root: string, installed: ReturnType<DefaultPackageManager["listConfiguredPackages"]>) {
+  const folders = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => entry.name);
+  return (source: string, scope: "user" | "project") => installed.some((entry) => entry.source === source && entry.scope === scope && entry.installedPath !== undefined && folders.includes(basename(entry.installedPath)));
+}
+
 export default async function extensionExtender(pi: ExtensionAPI) {
   try {
     const agentDir = getAgentDir();
@@ -140,14 +145,15 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       handler: async (args, ctx) => {
         const [subcommand, source] = args.trim().split(/\s+/);
         const report = (message: string) => ctx.ui.notify(message, "info");
+        const runDoctor = async () => doctor({ agentDir, cwd: process.cwd(), report, isCovered: await coveredBy(root, packages.listConfiguredPackages()) });
         const addCheckout = async (url: string) => {
           const name = basename(url).replace(/\.git$/, "");
           await run(root, "git", ["clone", url, name]);
           await run(join(root, name), "git", ["switch", "-c", "local", "--track", "origin/main"]);
-          await doctor({ agentDir, cwd: process.cwd(), report });
+          await runDoctor();
         };
         if (subcommand === "doctor") {
-          await doctor({ agentDir, cwd: process.cwd(), report });
+          await runDoctor();
           return;
         }
         if (subcommand === "add" && source?.startsWith("git:")) {
@@ -167,9 +173,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     const settingsManager = SettingsManager.create(process.cwd(), agentDir);
     const packages = new DefaultPackageManager({ cwd: process.cwd(), agentDir, settingsManager });
     const installed = packages.listConfiguredPackages();
-    const folders = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => entry.name);
-    const isCovered = (source: string, scope: "user" | "project") => installed.some((entry) => entry.source === source && entry.scope === scope && entry.installedPath !== undefined && folders.includes(basename(entry.installedPath)));
-    const fixes = await orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered });
+    const fixes = await orderExtenderBeforeCovered({ agentDir, cwd: process.cwd(), isCovered: await coveredBy(root, installed) });
     if (fixes.length) {
       for (const fix of fixes) console.error(`extension-extender: ${fix}`);
       console.error("extension-extender: settings were fixed; start Pi again.");

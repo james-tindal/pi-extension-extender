@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { doctor, orderExtenderBeforeCovered } from "./settings-doctor.ts";
 
 const EXTENDER = "npm:pi-extension-extender";
+const GIT_EXTENDER = "git:github.com/james-tindal/pi-extension-extender";
 
 function setup({ global, project }: { global?: string; project?: string }) {
   const agentDir = mkdtempSync(join(tmpdir(), "agent-"));
@@ -18,37 +19,37 @@ function setup({ global, project }: { global?: string; project?: string }) {
   return { agentDir, cwd };
 }
 
-async function run(paths: { agentDir: string; cwd: string }) {
+async function run(paths: { agentDir: string; cwd: string }, isCovered: (source: string, scope: "user" | "project") => boolean = () => false) {
   const reports: string[] = [];
-  await doctor({ ...paths, report: (message) => reports.push(message) });
+  await doctor({ ...paths, isCovered, report: (message) => reports.push(message) });
   return reports;
 }
 
-test("moves the extender to the top of the global settings and keeps the other entries in order", async () => {
+test("moves the extender above the covered package in the global settings and keeps the other entries in order", async () => {
   const paths = setup({
     global: JSON.stringify({ packages: ["npm:a", EXTENDER, { source: "npm:b", filtered: true }] }),
   });
-  const reports = await run(paths);
+  const reports = await run(paths, (source) => source === "npm:a");
   const settings = JSON.parse(readFileSync(join(paths.agentDir, "settings.json"), "utf8"));
   assert.deepEqual(settings.packages, [EXTENDER, "npm:a", { source: "npm:b", filtered: true }]);
-  assert.deepEqual(reports, [`moved extension-extender to the top of ${join(paths.agentDir, "settings.json")}`]);
+  assert.deepEqual(reports, [`moved extension-extender above npm:a in ${join(paths.agentDir, "settings.json")}`]);
 });
 
-test("leaves the file untouched when the extender is already first", async () => {
-  const content = JSON.stringify({ packages: [EXTENDER, "npm:a"] }, null, 2) + "\n";
+test("does not move the extender when it already precedes every covered package, even if it is not first", async () => {
+  const content = JSON.stringify({ packages: ["npm:x", EXTENDER, "npm:covered"] }, null, 2) + "\n";
   const paths = setup({ global: content });
-  const reports = await run(paths);
+  const reports = await run(paths, (source) => source === "npm:covered");
   assert.equal(readFileSync(join(paths.agentDir, "settings.json"), "utf8"), content);
   assert.deepEqual(reports, []);
 });
 
 test("matches the git source form of the extender", async () => {
   const paths = setup({
-    global: JSON.stringify({ packages: ["npm:a", "git:github.com/james-tindal/pi-extension-extender"] }),
+    global: JSON.stringify({ packages: ["npm:a", GIT_EXTENDER] }),
   });
-  const reports = await run(paths);
+  const reports = await run(paths, (source) => source === "npm:a");
   const settings = JSON.parse(readFileSync(join(paths.agentDir, "settings.json"), "utf8"));
-  assert.equal(settings.packages[0], "git:github.com/james-tindal/pi-extension-extender");
+  assert.deepEqual(settings.packages, [GIT_EXTENDER, "npm:a"]);
   assert.equal(reports.length, 1);
 });
 
@@ -60,16 +61,16 @@ test("reports when the extender is not listed in any settings file", async () =>
   assert.deepEqual(reports, ["extension-extender is not listed in any settings.json"]);
 });
 
-test("moves the extender to the top of project settings and warns when global packages load before it", async () => {
+test("moves the extender above covered packages in project settings and warns when global packages load before it", async () => {
   const paths = setup({
     global: JSON.stringify({ packages: ["npm:x"] }),
     project: JSON.stringify({ packages: ["npm:z", EXTENDER] }),
   });
-  const reports = await run(paths);
+  const reports = await run(paths, (source) => source === "npm:z");
   const project = JSON.parse(readFileSync(join(paths.cwd, ".pi", "settings.json"), "utf8"));
   assert.deepEqual(project.packages, [EXTENDER, "npm:z"]);
   assert.deepEqual(reports, [
-    `moved extension-extender to the top of ${join(paths.cwd, ".pi", "settings.json")}`,
+    `moved extension-extender above npm:z in ${join(paths.cwd, ".pi", "settings.json")}`,
     "extension-extender is in project settings, so global packages load before it; move it to the global settings.json",
   ]);
 });
@@ -81,6 +82,11 @@ test("does not warn when the extender is in project settings and no global packa
   });
   const reports = await run(paths);
   assert.deepEqual(reports, []);
+});
+
+test("throws on invalid settings JSON instead of skipping the file", async () => {
+  const paths = setup({ global: "{" });
+  await assert.rejects(run(paths), SyntaxError);
 });
 
 test("places the extender directly above the first covered entry in the global settings", async () => {
@@ -110,9 +116,4 @@ test("checks the project settings with the project scope", async () => {
   const project = JSON.parse(readFileSync(join(paths.cwd, ".pi", "settings.json"), "utf8"));
   assert.deepEqual(project.packages, [EXTENDER, "npm:covered"]);
   assert.equal(fixes.length, 1);
-});
-
-test("throws on invalid settings JSON instead of skipping the file", async () => {
-  const paths = setup({ global: "{" });
-  await assert.rejects(run(paths), SyntaxError);
 });
