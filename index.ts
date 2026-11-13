@@ -8,8 +8,6 @@ import { addCommand, coveredBy, installDependencies, orderCheck, overridden, pac
 import { run, upstreamFor } from "./prepare-upstream.ts";
 import { progress } from "./progress.ts";
 
-class RebaseConflict extends Error {}
-
 async function update({ checkout, source, report, installDependencies }: {
   checkout: string;
   source: string;
@@ -42,10 +40,10 @@ async function update({ checkout, source, report, installDependencies }: {
       try {
         await git(["-c", "rebase.updateRefs=false", "rebase", target]);
       } catch (error) {
-        if (await git(["diff", "--name-only", "--diff-filter=U"])) {
-          throw new RebaseConflict(`Rebase conflict in ${checkout}.\nResolve the rebase conflict in that repository, then restart Pi.`);
-        }
-        throw error;
+        if (!(await git(["diff", "--name-only", "--diff-filter=U"]))) throw error;
+        await git(["rebase", "--abort"]);
+        report(`Rebase conflict. Update skipped. To resolve: \`cd ${checkout}; git rebase ${target}\``, true);
+        return;
       }
     }
     const updated = before !== await git(["rev-parse", "HEAD"]);
@@ -141,7 +139,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     }
   } catch (error) {
     progress();
-    console.error("extension-extender: startup failed", error instanceof RebaseConflict ? error.message : error);
+    console.error("extension-extender: startup failed", error);
     process.exit(1);
   }
 }
