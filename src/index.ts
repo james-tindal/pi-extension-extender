@@ -144,6 +144,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     const folders = (await readdir(root, { withFileTypes: true })).filter((folder) => folder.isDirectory() && !folder.name.startsWith('.'))
     const board = statusBoard(folders.map((folder) => folder.name))
     let previousLoad: Promise<void> = Promise.resolve()
+    let loaded = 0
     await Promise.all(folders.map((folder) => {
       const checkout = join(root, folder.name)
       const report = (stage: string) => board(folder.name, stage)
@@ -177,6 +178,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
               await factory(pi)
             }
           }
+          loaded++
         } catch (error) {
           const message = `Failed to load extension '${checkout}': ${error instanceof Error ? error.message : String(error)}`
           report(message)
@@ -186,6 +188,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       previousLoad = load
       return load
     }))
+    progress(`${loaded}/${folders.length} packages loaded`, true)
   } catch (error) {
     progress()
     console.error('extension-extender: startup failed', error)
