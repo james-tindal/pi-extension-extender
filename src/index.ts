@@ -43,10 +43,11 @@ async function acquireLock(lock: string, report: (stage: string) => void) {
   }
 }
 
-async function update({ checkout, source, report, installDependencies }: {
+async function update({ checkout, source, report, warn, installDependencies }: {
   checkout: string
   source: string
   report: (stage: string, done?: boolean) => void
+  warn: (message: string) => void
   installDependencies: (cwd: string) => Promise<void>
 }) {
   report('checking repository')
@@ -75,7 +76,8 @@ async function update({ checkout, source, report, installDependencies }: {
       } catch (error) {
         if (!(await git(['diff', '--name-only', '--diff-filter=U']))) throw error
         await git(['rebase', '--abort'])
-        report(`Rebase conflict. Update skipped. To resolve: \`cd ${checkout}; git rebase ${target}\``, true)
+        report('Rebase conflict. Update skipped.', true)
+        warn(`Rebase conflict in ${basename(checkout)}. To resolve: \`cd ${checkout}; git rebase ${target}\``)
         return
       }
     }
@@ -161,6 +163,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
               checkout,
               source,
               report,
+              warn: (message) => warnings.push(message),
               installDependencies: (cwd) => installDependencies(packages, cwd),
             })
           } catch (error) {
