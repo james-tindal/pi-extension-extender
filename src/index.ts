@@ -87,10 +87,9 @@ async function update({ checkout, source, report, installDependencies }: {
   }
 }
 
-async function redirect({ installed, checkout, report }: {
+async function redirect({ installed, checkout }: {
   installed: string
   checkout: string
-  report: (stage: string) => void
 }) {
   if (resolve(installed) === resolve(checkout)) return
   const stat = await lstat(installed)
@@ -98,12 +97,10 @@ async function redirect({ installed, checkout, report }: {
     const target = resolve(installed, '..', await readlink(installed))
     if (realpathSync(target) === realpathSync(checkout)) return
     // The package manager relinked it on reinstall; take it back.
-    report('relinking installed package to local checkout')
     await unlink(installed)
     await symlink(checkout, installed, 'dir')
     return
   }
-  report('redirecting installed package to local checkout')
   await rm(installed, { recursive: true })
   await symlink(checkout, installed, 'dir')
 }
@@ -171,7 +168,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
         try {
           const matches = installed.filter((entry) => entry.installedPath && basename(entry.installedPath) === folder.name)
           if (matches.length) {
-            for (const match of matches) await redirect({ installed: match.installedPath!, checkout, report })
+            for (const match of matches) await redirect({ installed: match.installedPath!, checkout })
           } else {
             const resources = await packages.resolveExtensionSources([checkout])
             for (const resource of resources.extensions) {
