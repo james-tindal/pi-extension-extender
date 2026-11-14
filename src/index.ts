@@ -125,14 +125,18 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     })
     const installed = packages.listConfiguredPackages()
     const order = await orderCheck({ agentDir, cwd: process.cwd(), root, packages })
-    for (const fix of order.fixes) pi.on('session_start', (_event, ctx) => ctx.ui.notify(`${fix}. Run /reload to apply it.`, 'warning'))
+    const warnings: string[] = []
+    pi.on('session_start', (_event, ctx) => {
+      if (warnings.length) ctx.ui.notify(['extension-extender', ...warnings.flatMap((warning) => warning.split('\n').map((line) => `  ${line}`))].join('\n'), 'warning')
+    })
+    for (const fix of order.fixes) warnings.push(`${fix}. Run /reload to apply it.`)
     const skipUpdate = new Set(order.overrides.map((source) => {
       const entry = installed.find((item) => item.source === source && item.scope === 'user')
       if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`)
       return basename(entry.installedPath)
     }))
     for (const source of order.overrides) {
-      pi.on('session_start', (_event, ctx) => ctx.ui.notify(overrideWarning(source), 'warning'))
+      warnings.push(overrideWarning(source))
     }
     const folders = (await readdir(root, { withFileTypes: true })).filter((folder) => folder.isDirectory() && !folder.name.startsWith('.'))
     const board = statusBoard([...folders.map((folder) => folder.name), ''])
@@ -146,7 +150,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       const source = installed.find((entry) => entry.installedPath && basename(entry.installedPath) === folder.name)?.source
       if (source === undefined) {
         report('No matching package found. Cannot check for updates.')
-        pi.on('session_start', (_event, ctx) => ctx.ui.notify(`extension-extender: found ${folder.name} override repository but no matching package in settings.json. Add a matching package to enable updating your override from upstream`, 'warning'))
+        warnings.push(`found ${folder.name} override repository but no matching package in settings.json. Add a matching package to enable updating your override from upstream`)
       }
       if (skipUpdate.has(folder.name)) report('Package loaded before extension-extender')
       const before = previousLoad
