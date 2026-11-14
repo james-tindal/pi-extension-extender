@@ -61,6 +61,12 @@ export function installDependencies(packages: DefaultPackageManager, cwd: string
   return packages['runNpmCommand']([...packages['getGitDependencyInstallArgs'](), flag], { cwd })
 }
 
+export const folderOf = (installed: InstalledPackages) => (source: string, scope: 'user' | 'project') => {
+  const entry = installed.find((item) => item.source === source && item.scope === scope)
+  if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`)
+  return basename(entry.installedPath)
+}
+
 export const overridden = (root: string, installed: InstalledPackages) => async (source: string) => {
   const entry = installed.find((item) => item.source === source && item.scope === 'user' && item.installedPath !== undefined)
   if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`)
@@ -84,7 +90,7 @@ export async function orderCheck({ agentDir, cwd, root, packages }: {
   packages: DefaultPackageManager
 }) {
   const current = packages.listConfiguredPackages()
-  return orderExtenderBeforeCovered({ agentDir, cwd, isCovered: await coveredBy(root, current), hasOverride: overridden(root, current) })
+  return orderExtenderBeforeCovered({ agentDir, cwd, isCovered: await coveredBy(root, current), hasOverride: overridden(root, current), nameOf: folderOf(current) })
 }
 
 export async function addCommand({ tokens, root, agentDir, cwd, packages }: {
@@ -101,7 +107,7 @@ export async function addCommand({ tokens, root, agentDir, cwd, packages }: {
     messages.push({ text: `Checkout: ${checkout}`, level: 'info' })
   }
   const order = await orderCheck({ agentDir, cwd, root, packages })
-  for (const fix of order.fixes) messages.push({ text: `${fix}. Run /reload to apply it.`, level: 'warning' })
-  for (const source of order.overrides) messages.push({ text: overrideWarning(source), level: 'warning' })
+  for (const fix of order.fixes) messages.push({ text: fix, level: 'warning' })
+  for (const source of order.overrides) messages.push({ text: overrideWarning(folderOf(packages.listConfiguredPackages())(source, 'user')), level: 'warning' })
   return messages
 }

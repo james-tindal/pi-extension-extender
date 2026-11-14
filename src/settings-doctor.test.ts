@@ -25,7 +25,7 @@ async function order(
   isCovered: (source: string, scope: 'user' | 'project') => boolean = () => false,
   hasOverride: (source: string) => Promise<boolean> = noOverride,
 ) {
-  return orderExtenderBeforeCovered({ ...paths, isCovered, hasOverride })
+  return orderExtenderBeforeCovered({ ...paths, isCovered, hasOverride, nameOf: (source) => source })
 }
 
 test('moves the extender above the covered package in the global settings and keeps the other entries in order', async () => {
@@ -35,7 +35,7 @@ test('moves the extender above the covered package in the global settings and ke
   const { fixes } = await order(paths, (source) => source === 'npm:a')
   const settings = JSON.parse(readFileSync(join(paths.agentDir, 'settings.json'), 'utf8'))
   assert.deepEqual(settings.packages, [EXTENDER, 'npm:a', { source: 'npm:b', filtered: true }])
-  assert.deepEqual(fixes, [`moved extension-extender above npm:a in ${join(paths.agentDir, 'settings.json')}`])
+  assert.deepEqual(fixes, [`npm:a: Run /reload to enable the override. (Moved extension-extender above it in ${join(paths.agentDir, 'settings.json')})`])
 })
 
 test('does not move the extender when it already precedes every covered package, even if it is not first', async () => {
@@ -72,7 +72,7 @@ test('moves the extender above covered packages in project settings', async () =
   const { fixes, overrides } = await order(paths, (source, scope) => scope === 'project' && source === 'npm:z')
   const project = JSON.parse(readFileSync(join(paths.cwd, '.pi', 'settings.json'), 'utf8'))
   assert.deepEqual(project.packages, [EXTENDER, 'npm:z'])
-  assert.deepEqual(fixes, [`moved extension-extender above npm:z in ${join(paths.cwd, '.pi', 'settings.json')}`])
+  assert.deepEqual(fixes, [`npm:z: Run /reload to enable the override. (Moved extension-extender above it in ${join(paths.cwd, '.pi', 'settings.json')})`])
   assert.deepEqual(overrides, [])
 })
 
@@ -118,7 +118,7 @@ test('places the extender directly above the first covered entry in the global s
   const { fixes } = await order(paths, (source, scope) => scope === 'user' && source === 'npm:covered')
   const settings = JSON.parse(readFileSync(join(paths.agentDir, 'settings.json'), 'utf8'))
   assert.deepEqual(settings.packages, ['npm:a', EXTENDER, 'npm:covered', 'npm:b'])
-  assert.deepEqual(fixes, [`moved extension-extender above npm:covered in ${join(paths.agentDir, 'settings.json')}`])
+  assert.deepEqual(fixes, [`npm:covered: Run /reload to enable the override. (Moved extension-extender above it in ${join(paths.agentDir, 'settings.json')})`])
 })
 
 test('checks the project settings with the project scope', async () => {

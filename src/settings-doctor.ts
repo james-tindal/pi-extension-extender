@@ -36,13 +36,14 @@ export async function addPackageEntry(path: string, source: string): Promise<voi
   await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`)
 }
 
-export const overrideWarning = (source: string): string => `extension-extender couldn't override ${source} because ${source} was installed globally but extension-extender is installed locally.\nEither install extension-extender globally or move ${source} from global to local.`
+export const overrideWarning = (name: string): string => `${name}: couldn't override because it was installed globally but extension-extender is installed locally.\nEither install extension-extender globally or move ${name} from global to local.`
 
-export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered, hasOverride }: {
+export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered, hasOverride, nameOf }: {
   agentDir: string
   cwd: string
   isCovered: (source: string, scope: 'user' | 'project') => boolean
   hasOverride: (source: string) => Promise<boolean>
+  nameOf: (source: string, scope: 'user' | 'project') => string
 }): Promise<{ fixes: string[]; overrides: string[] }> {
   const globalPath = join(agentDir, 'settings.json')
   const projectPath = join(cwd, '.pi', 'settings.json')
@@ -61,7 +62,7 @@ export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered, has
     const [extender] = packages.splice(extenderIndex, 1)
     packages.splice(coveredIndex, 0, extender)
     await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`)
-    fixes.push(`moved extension-extender above ${sourceOf(packages[coveredIndex + 1])} in ${path}`)
+    fixes.push(`${nameOf(sourceOf(packages[coveredIndex + 1]) ?? '', scope)}: Run /reload to enable the override. (Moved extension-extender above it in ${path})`)
   }
   if (listed.project && !listed.user) {
     const globalSettings = await readSettings(globalPath)

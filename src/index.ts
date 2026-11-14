@@ -4,7 +4,7 @@ import { link, mkdir, readdir, readFile, readlink, rm, symlink, lstat, unlink, w
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { overrideWarning } from './settings-doctor.ts'
-import { addCommand, coveredBy, installDependencies, orderCheck, overridden, packageSetup } from './add-package.ts'
+import { addCommand, coveredBy, folderOf, installDependencies, orderCheck, overridden, packageSetup } from './add-package.ts'
 import { run, upstreamFor } from './prepare-upstream.ts'
 import { progress, statusBoard } from './progress.ts'
 
@@ -77,7 +77,7 @@ async function update({ checkout, source, report, warn, installDependencies }: {
         if (!(await git(['diff', '--name-only', '--diff-filter=U']))) throw error
         await git(['rebase', '--abort'])
         report('Rebase conflict. Update skipped.', true)
-        warn(`Rebase conflict in ${basename(checkout)}. To resolve: \`cd ${checkout}; git rebase ${target}\``)
+        warn(`${basename(checkout)}: Rebase conflict. To resolve: \`cd ${checkout}; git rebase ${target}\``)
         return
       }
     }
@@ -131,15 +131,9 @@ export default async function extensionExtender(pi: ExtensionAPI) {
     pi.on('session_start', (_event, ctx) => {
       if (warnings.length) ctx.ui.notify(['extension-extender', ...warnings.flatMap((warning) => warning.split('\n').map((line) => `  ${line}`))].join('\n'), 'warning')
     })
-    for (const fix of order.fixes) warnings.push(`${fix}. Run /reload to apply it.`)
-    const skipUpdate = new Set(order.overrides.map((source) => {
-      const entry = installed.find((item) => item.source === source && item.scope === 'user')
-      if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`)
-      return basename(entry.installedPath)
-    }))
-    for (const source of order.overrides) {
-      warnings.push(overrideWarning(source))
-    }
+    for (const fix of order.fixes) warnings.push(fix)
+    const skipUpdate = new Set(order.overrides.map((source) => folderOf(installed)(source, 'user')))
+    for (const name of skipUpdate) warnings.push(overrideWarning(name))
     const folders = (await readdir(root, { withFileTypes: true })).filter((folder) => folder.isDirectory() && !folder.name.startsWith('.'))
     const board = statusBoard([...folders.map((folder) => folder.name), ''])
     let previousLoad: Promise<void> = Promise.resolve()
@@ -152,7 +146,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       const source = installed.find((entry) => entry.installedPath && basename(entry.installedPath) === folder.name)?.source
       if (source === undefined) {
         report('No matching package found. Cannot check for updates.')
-        warnings.push(`found ${folder.name} override repository but no matching package in settings.json. Add a matching package to enable updating your override from upstream`)
+        warnings.push(`${folder.name}: found override repository but no matching package in settings.json. Add a matching package to enable updating your override from upstream`)
       }
       if (skipUpdate.has(folder.name)) report('Package loaded before extension-extender')
       const before = previousLoad
