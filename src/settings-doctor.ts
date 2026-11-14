@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-export const EXTENDER_SOURCES = ['npm:pi-extension-extender', 'git:github.com/james-tindal/pi-extension-extender']
+export const isExtender = (source: string): boolean => source.endsWith('pi-extension-extender')
 
 type Settings = { packages?: unknown } & Record<string, unknown>
 
@@ -24,7 +24,7 @@ export async function hasEntry(path: string, source: string): Promise<boolean> {
 
 export async function listsExtender(path: string): Promise<boolean> {
   const settings = await readSettings(path)
-  return Array.isArray(settings?.packages) && settings.packages.some((entry) => EXTENDER_SOURCES.includes(sourceOf(entry) ?? ''))
+  return Array.isArray(settings?.packages) && settings.packages.some((entry) => isExtender(sourceOf(entry) ?? ''))
 }
 
 export async function addPackageEntry(path: string, source: string): Promise<void> {
@@ -55,10 +55,10 @@ export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered, has
     const settings = await readSettings(path)
     if (!settings || !Array.isArray(settings.packages)) continue
     const packages = settings.packages
-    const extenderIndex = packages.findIndex((entry) => EXTENDER_SOURCES.includes(sourceOf(entry) ?? ''))
+    const extenderIndex = packages.findIndex((entry) => isExtender(sourceOf(entry) ?? ''))
     if (extenderIndex === -1) continue
     listed[scope] = true
-    const coveredIndex = packages.findIndex((entry) => !EXTENDER_SOURCES.includes(sourceOf(entry) ?? '') && isCovered(sourceOf(entry) ?? '', scope))
+    const coveredIndex = packages.findIndex((entry) => !isExtender(sourceOf(entry) ?? '') && isCovered(sourceOf(entry) ?? '', scope))
     if (coveredIndex === -1 || coveredIndex > extenderIndex) continue
     const [extender] = packages.splice(extenderIndex, 1)
     packages.splice(coveredIndex, 0, extender)
