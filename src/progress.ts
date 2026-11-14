@@ -30,5 +30,6 @@ export function statusBoard(names: string[]) {
       process.stderr.write(rowLine(row, messages.get(row)!))
       moveCursor(process.stderr, 0, up)
     })
+    cursorTo(process.stderr, 0)
   }
 }
