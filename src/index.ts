@@ -149,7 +149,10 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       const checkout = join(root, folder.name)
       const report = (stage: string) => board(folder.name, stage)
       const source = installed.find((entry) => entry.installedPath && basename(entry.installedPath) === folder.name)?.source
-      if (source === undefined) report('No matching package found. Cannot check for updates.')
+      if (source === undefined) {
+        report('No matching package found. Cannot check for updates.')
+        pi.on('session_start', (_event, ctx) => ctx.ui.notify(`extension-extender: found ${folder.name} override repository but no matching package in settings.json. Add a matching package to enable updating your override from upstream`, 'warning'))
+      }
       const before = previousLoad
       const load = (async () => {
         if (!skipUpdate.has(folder.name) && source !== undefined) {
