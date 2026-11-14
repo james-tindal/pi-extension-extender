@@ -66,7 +66,7 @@ export const overridden = (root: string, installed: InstalledPackages) => async 
   if (entry?.installedPath === undefined) throw new Error(`${source} has no installed path`)
   const checkout = join(root, basename(entry.installedPath))
   const upstream = await upstreamFor({ checkout, source, run })
-  if (upstream === undefined) return false
+  if (typeof upstream !== 'string') return false
   const ahead = await run(checkout, 'git', ['rev-list', '--count', `HEAD..${upstream}`])
   const dirty = await run(checkout, 'git', ['status', '--porcelain'])
   return ahead !== '0' || dirty !== ''

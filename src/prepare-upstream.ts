@@ -2,9 +2,7 @@ import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { basename } from 'node:path'
 import { promisify } from 'node:util'
-import { progress } from './progress.ts'
 
 const exec = promisify(execFile)
 
@@ -90,14 +88,11 @@ export async function upstreamFor({ checkout, source, run }: {
   checkout: string
   source: string
   run: Run
-}) {
+}): Promise<string | { skipped: string }> {
   try {
     return await prepareUpstream({ checkout, source, run })
   } catch (error) {
-    if (error instanceof UpdateSkipped) {
-      progress(`${basename(checkout)}: ${error.message}`, true)
-      return undefined
-    }
+    if (error instanceof UpdateSkipped) return { skipped: error.message }
     throw error
   }
 }

@@ -63,9 +63,12 @@ async function update({ checkout, source, report, installDependencies }: {
       if (existsSync(join(gitDir, state))) throw new Error(`${checkout} has an unfinished Git operation.`)
     }
     const target = await upstreamFor({ checkout, source, run })
-    if (target === undefined) return
+    if (typeof target !== 'string') {
+      report(`Update skipped: ${target.skipped}`, true)
+      return
+    }
     const before = await git(['rev-parse', 'HEAD'])
-    if (target !== undefined && await git(['rev-list', '--count', `HEAD..${target}`]) !== '0') {
+    if (await git(['rev-list', '--count', `HEAD..${target}`]) !== '0') {
       report(`rebasing onto ${target}`)
       try {
         await git(['-c', 'rebase.updateRefs=false', 'rebase', target])
