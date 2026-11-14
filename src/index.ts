@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { link, mkdir, readdir, readFile, readlink, rm, symlink, lstat, unlink, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { overrideBrief, overrideWarning } from './settings-doctor.ts'
+import { overrideWarning } from './settings-doctor.ts'
 import { addCommand, coveredBy, installDependencies, orderCheck, overridden, packageSetup } from './add-package.ts'
 import { run, upstreamFor } from './prepare-upstream.ts'
 import { progress, statusBoard } from './progress.ts'
@@ -138,7 +138,6 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       return basename(entry.installedPath)
     }))
     for (const source of order.overrides) {
-      console.error(`extension-extender: ${overrideBrief(source)}`)
       pi.on('session_start', (_event, ctx) => ctx.ui.notify(overrideWarning(source), 'warning'))
     }
     const folders = (await readdir(root, { withFileTypes: true })).filter((folder) => folder.isDirectory() && !folder.name.startsWith('.'))
@@ -153,6 +152,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
         report('No matching package found. Cannot check for updates.')
         pi.on('session_start', (_event, ctx) => ctx.ui.notify(`extension-extender: found ${folder.name} override repository but no matching package in settings.json. Add a matching package to enable updating your override from upstream`, 'warning'))
       }
+      if (skipUpdate.has(folder.name)) report('Package loaded before extension-extender')
       const before = previousLoad
       const load = (async () => {
         if (!skipUpdate.has(folder.name) && source !== undefined) {

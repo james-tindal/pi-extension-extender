@@ -36,9 +36,7 @@ export async function addPackageEntry(path: string, source: string): Promise<voi
   await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`)
 }
 
-export const overrideBrief = (source: string): string => `${source} is loaded from global settings before the local override`
-
-export const overrideWarning = (source: string): string => `${source} loads from global settings before local extension-extender can load. Run /extension-extender install-global to enable your package override`
+export const overrideWarning = (source: string): string => `extension-extender couldn't override ${source} because ${source} was installed globally but extension-extender is installed locally.\nEither install extension-extender globally or move ${source} from global to local.`
 
 export async function orderExtenderBeforeCovered({ agentDir, cwd, isCovered, hasOverride }: {
   agentDir: string
