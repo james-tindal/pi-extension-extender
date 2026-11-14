@@ -188,7 +188,7 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       previousLoad = load
       return load
     }))
-    progress(`${loaded}/${folders.length} packages loaded`, true)
+    progress(`done. ${loaded}/${folders.length} packages loaded`, true)
   } catch (error) {
     progress()
     console.error('extension-extender: startup failed', error)
