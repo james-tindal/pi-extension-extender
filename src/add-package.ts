@@ -18,7 +18,7 @@ export async function addPackage({ tokens, root, agentDir, cwd, run }: {
   const globalPath = join(agentDir, 'settings.json')
   const targetPath = local ? join(cwd, '.pi', 'settings.json') : globalPath
   if (!local && !(await listsExtender(globalPath))) {
-    throw new Error('extension-extender is not in global settings. Run /extension-extender install-global first, or add with -l.')
+    throw new Error('extension-extender is not in global settings')
   }
   let url: string
   if (source.startsWith('git:')) {

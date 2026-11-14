@@ -58,7 +58,7 @@ test('aborts a global add when the extender is not in global settings, and write
   const content = JSON.stringify({ packages: ['npm:other'] })
   const paths = setup({ global: content })
   const { run, calls } = fakeRun()
-  await assert.rejects(add(paths, run, 'add git:github.com/owner/repo'), /install-global first, or add with -l/)
+  await assert.rejects(add(paths, run, 'add git:github.com/owner/repo'), /extension-extender is not in global settings/)
   assert.equal(readFileSync(join(paths.agentDir, 'settings.json'), 'utf8'), content)
   assert.deepEqual(calls, [])
 })

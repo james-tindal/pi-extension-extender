@@ -116,17 +116,11 @@ export default async function extensionExtender(pi: ExtensionAPI) {
       handler: async (args, ctx) => {
         const tokens = args.trim().split(/\s+/)
         const [subcommand] = tokens
-        if (subcommand === 'install-global') {
-          await packages.install('npm:pi-extension-extender')
-          await orderCheck({ agentDir, cwd: process.cwd(), root, packages })
-          await ctx.reload()
-          return
-        }
         if (subcommand === 'add') {
           for (const message of await addCommand({ tokens, root, agentDir, cwd: process.cwd(), packages })) ctx.ui.notify(message.text, message.level)
           return
         }
-        throw new Error('Usage: /extension-extender add [-l|--local] <git:|npm:> | /extension-extender install-global')
+        throw new Error('Usage: /extension-extender add [-l|--local] <git:|npm:>')
       },
     })
     const installed = packages.listConfiguredPackages()
