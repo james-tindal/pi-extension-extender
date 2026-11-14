@@ -169,7 +169,6 @@ export default async function extensionExtender(pi: ExtensionAPI) {
           if (matches.length) {
             for (const match of matches) await redirect({ installed: match.installedPath!, checkout, report })
           } else {
-            report('loading local extension')
             const resources = await packages.resolveExtensionSources([checkout])
             for (const resource of resources.extensions) {
               if (!resource.enabled) continue
