@@ -12,9 +12,11 @@ export function progress(message = '', done = false) {
   }
 }
 
+const rowLine = (name: string, message: string) => `extension-extender: ${name ? `${name}: ` : ''}${message}`
+
 export function statusBoard(names: string[]) {
   if (!process.stderr.isTTY) {
-    return (name: string, message: string) => process.stderr.write(`extension-extender: ${name}: ${message}\n`)
+    return (name: string, message: string) => process.stderr.write(`${rowLine(name, message)}\n`)
   }
   const messages = new Map(names.map((name): [string, string] => [name, '']))
   process.stderr.write('\n'.repeat(names.length))
@@ -25,7 +27,7 @@ export function statusBoard(names: string[]) {
       moveCursor(process.stderr, 0, -up)
       cursorTo(process.stderr, 0)
       clearLine(process.stderr, 0)
-      process.stderr.write(`extension-extender: ${row}: ${messages.get(row)}`)
+      process.stderr.write(rowLine(row, messages.get(row)!))
       moveCursor(process.stderr, 0, up)
     })
   }
