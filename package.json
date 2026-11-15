@@ -13,13 +13,15 @@
   },
   "type": "module",
   "bin": {
-    "extension-extender": "./src/add.ts"
+    "extension-extender": "src/add.ts"
   },
   "scripts": {
     "test": "node --test"
   },
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
